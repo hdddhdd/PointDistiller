@@ -151,3 +151,8 @@ runner = dict(max_epochs=80)
 
 # Use evaluation interval=2 reduce the number of evaluation timese
 evaluation = dict(interval=2)
+
+
+# runtime settings
+device = 'cuda'
+gpu_ids = [0]

@@ -49,27 +49,9 @@ class MVXTwoStageDetector(Base3DDetector):
                  init_cfg=None):
         super(MVXTwoStageDetector, self).__init__(init_cfg=init_cfg)
         
-        # KD layers for PointPillars
-        # 2x compression (teacher)
-        self.teacher_gcn_adapt = ConvModule(in_channels=256*2,
-                                            out_channels=64,
-                                            kernel_size=(1, 1),
-                                            stride=(1, 1),
-                                            conv_cfg=dict(type='Conv2d'),
-                                            norm_cfg=dict(type='BN2d'),
-                                            act_cfg=dict(type='ReLU'),
-                                            bias='auto')
+        self.teacher_gcn_adapt = None
+        self.student_gcn_adapt = None
 
-        # 2x compression (student)
-        self.student_gcn_adapt = ConvModule(in_channels=182*2,
-                                            out_channels=64,
-                                            kernel_size=(1, 1),
-                                            stride=(1, 1),
-                                            conv_cfg=dict(type='Conv2d'),
-                                            norm_cfg=dict(type='BN2d'),
-                                            act_cfg=dict(type='ReLU'),
-                                            bias='auto')
-        
         if pts_voxel_layer:
             self.pts_voxel_layer = Voxelization(**pts_voxel_layer)
         if pts_voxel_encoder:
@@ -100,6 +82,28 @@ class MVXTwoStageDetector(Base3DDetector):
             self.img_rpn_head = builder.build_head(img_rpn_head)
         if img_roi_head is not None:
             self.img_roi_head = builder.build_head(img_roi_head)
+
+        kd_neck_channels = self._get_kd_neck_out_channels()
+        if kd_neck_channels is not None:
+            in_channels = kd_neck_channels * 2
+            self.teacher_gcn_adapt = ConvModule(
+                in_channels=in_channels,
+                out_channels=64,
+                kernel_size=(1, 1),
+                stride=(1, 1),
+                conv_cfg=dict(type='Conv2d'),
+                norm_cfg=dict(type='BN2d'),
+                act_cfg=dict(type='ReLU'),
+                bias='auto')
+            self.student_gcn_adapt = ConvModule(
+                in_channels=in_channels,
+                out_channels=64,
+                kernel_size=(1, 1),
+                stride=(1, 1),
+                conv_cfg=dict(type='Conv2d'),
+                norm_cfg=dict(type='BN2d'),
+                act_cfg=dict(type='ReLU'),
+                bias='auto')
 
         self.train_cfg = train_cfg
         self.test_cfg = test_cfg
@@ -132,6 +136,18 @@ class MVXTwoStageDetector(Base3DDetector):
                               'key, please consider using init_cfg')
                 self.pts_backbone.init_cfg = dict(
                     type='Pretrained', checkpoint=pts_pretrained)
+
+    def _get_kd_neck_out_channels(self):
+        if not hasattr(self, 'pts_neck') or self.pts_neck is None:
+            return None
+        out_channels = getattr(self.pts_neck, 'out_channels', None)
+        if out_channels is None:
+            return None
+        if isinstance(out_channels, (list, tuple)):
+            if self.pts_neck.__class__.__name__ == 'SECONDFPN':
+                return sum(out_channels)
+            return out_channels[0]
+        return out_channels
 
     @property
     def with_img_shared_head(self):
@@ -607,3 +623,15 @@ class MVXTwoStageDetector(Base3DDetector):
 
             pred_bboxes = pred_bboxes.tensor.cpu().numpy()
             show_result(points, None, pred_bboxes, out_dir, file_name)
+    # calflops 하기 위해서 새로 추가
+    def forward_dummy(self, points):
+        """Forward function for computing FLOPs."""
+        voxels, num_points, coors = self.voxelize(points)
+        voxel_features = self.pts_voxel_encoder(voxels, num_points, coors)
+        batch_size = coors[-1, 0] + 1
+        x = self.pts_middle_encoder(voxel_features, coors, batch_size)
+        x = self.pts_backbone(x)
+        if self.with_pts_neck:
+            x = self.pts_neck(x)
+        outs = self.pts_bbox_head(x)
+        return outs

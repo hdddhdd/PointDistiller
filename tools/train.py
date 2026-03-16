@@ -17,6 +17,7 @@ from os import path as osp
 import mmcv
 import torch
 from mmcv import Config, DictAction
+from mmcv.cnn import ConvModule
 from mmcv.runner import get_dist_info, init_dist
 
 from mmdet import __version__ as mmdet_version
@@ -44,6 +45,7 @@ def build_teacher(_cfg, use_kd=False):
         'KittiDataset_second': "configs/second/hv_second_secfpn_6x8_80e_kitti-3d-3class.py",
         'KittiDataset_point_rcnn': "configs/point_rcnn/point_rcnn_2x8_kitti-3d-3classes.py",
         'NuScenesDataset_pointpillars': "configs/pointpillars/hv_pointpillars_fpn_sbn-all_4x8_2x_nus-3d.py",
+        'NuScenesDataset_centerpoint': "configs/centerpoint/centerpoint_01voxel_second_secfpn_4x8_cyclic_20e_nus.py",
     }
     teacher_ckpts = {
         'KittiDataset_pointpillars': "pretrain/hv_pointpillars_secfpn_6x8_160e_kitti-3d-3class_20200620_230421-aa0f3adb.pth",
@@ -52,6 +54,7 @@ def build_teacher(_cfg, use_kd=False):
         # 'KittiDataset_second': "pretrain/hv_second_secfpn_fp16_6x8_80e_kitti-3d-3class_20200925_110059-05f67bdf.pth",
         'KittiDataset_point_rcnn': "pretrain/point_rcnn_2x8_kitti-3d-3classes_20211208_151344.pth", 
         'NuScenesDataset_pointpillars': "pretrain/hv_pointpillars_fpn_sbn-all_4x8_2x_nus-3d_20200620_230405-2fa62f3d.pth",
+        'NuScenesDataset_centerpoint': "pretrain/cpvoxel_teacher_nusc_ep20.pth", ########## teacher 선택하는 부분
     }
     if use_kd:
         student_cfg = Config.fromfile(_cfg)
@@ -68,6 +71,30 @@ def build_teacher(_cfg, use_kd=False):
     else:
         teacher = None
     return teacher
+
+
+def _get_kd_neck_out_channels(model):
+    neck = getattr(model, 'pts_neck', None)
+    if neck is None or not hasattr(neck, 'out_channels'):
+        return None
+    out_channels = neck.out_channels
+    if isinstance(out_channels, (list, tuple)):
+        if neck.__class__.__name__ == 'SECONDFPN':
+            return sum(out_channels)
+        return out_channels[0]
+    return out_channels
+
+
+def _build_kd_adapter(in_channels):
+    return ConvModule(
+        in_channels=in_channels,
+        out_channels=64,
+        kernel_size=(1, 1),
+        stride=(1, 1),
+        conv_cfg=dict(type='Conv2d'),
+        norm_cfg=dict(type='BN2d'),
+        act_cfg=dict(type='ReLU'),
+        bias='auto')
 
 def parse_args():
     parser = argparse.ArgumentParser(description='Train a detector')
@@ -186,6 +213,9 @@ def main():
     if args.gpus is None and args.gpu_ids is None:
         cfg.gpu_ids = [args.gpu_id]
 
+    if not hasattr(cfg, 'device'):
+        cfg.device = 'cuda'
+
     if args.autoscale_lr:
         # apply the linear scaling rule (https://arxiv.org/abs/1706.02677)
         cfg.optimizer['lr'] = cfg.optimizer['lr'] * len(cfg.gpu_ids) / 8
@@ -248,6 +278,14 @@ def main():
         test_cfg=cfg.get('test_cfg'))
 
     teacher = build_teacher(args.config, args.use_kd)
+
+    if args.use_kd and teacher is not None:
+        teacher_channels = _get_kd_neck_out_channels(teacher)
+        student_channels = _get_kd_neck_out_channels(model)
+        if teacher_channels is not None:
+            model.teacher_gcn_adapt = _build_kd_adapter(teacher_channels * 2)
+        if student_channels is not None:
+            model.student_gcn_adapt = _build_kd_adapter(student_channels * 2)
 
     model.init_weights()
 

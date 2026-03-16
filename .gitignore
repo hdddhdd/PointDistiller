@@ -132,7 +132,8 @@ dmypy.json
 *.pth
 
 # customs
-/data
+data/
+work_dirs/
 .vscode
 .idea
 *.pkl
@@ -149,3 +150,5 @@ student_vis/
 teacher_vis/
 logs/
 visualizations/pointpillars/
+
+

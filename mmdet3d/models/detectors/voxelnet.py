@@ -605,3 +605,15 @@ class VoxelNet(SingleStage3DDetector):
                                             self.bbox_head.test_cfg)
 
         return [merged_bboxes]
+    # calflops 하기 위해서 새로 추가
+    def forward_dummy(self, points):
+        """Forward function for computing FLOPs."""
+        voxels, num_points, coors = self.voxelize(points)
+        voxel_features = self.pts_voxel_encoder(voxels, num_points, coors)
+        batch_size = coors[-1, 0] + 1
+        x = self.pts_middle_encoder(voxel_features, coors, batch_size)
+        x = self.pts_backbone(x)
+        if self.with_pts_neck:
+            x = self.pts_neck(x)
+        outs = self.pts_bbox_head(x)
+        return outs

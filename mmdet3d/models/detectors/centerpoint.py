@@ -33,18 +33,26 @@ class CenterPoint(MVXTwoStageDetector):
                              pts_bbox_head, img_roi_head, img_rpn_head,
                              train_cfg, test_cfg, pretrained, init_cfg)
 
-    def extract_pts_feat(self, pts, img_feats, img_metas):
+    def extract_pts_feat(self, pts, img_feats, img_metas, get_info=False):
         """Extract features of points."""
         if not self.with_pts_bbox:
             return None
+        info = {}
         voxels, num_points, coors = self.voxelize(pts)
 
         voxel_features = self.pts_voxel_encoder(voxels, num_points, coors)
+        info['voxel_features'] = voxel_features
+        info['pts'] = pts
         batch_size = coors[-1, 0] + 1
         x = self.pts_middle_encoder(voxel_features, coors, batch_size)
+        info['num_points'] = num_points
         x = self.pts_backbone(x)
+        info['backbone_feature'] = x
         if self.with_pts_neck:
             x = self.pts_neck(x)
+        info['neck_feature'] = x
+        if get_info:
+            return x, info
         return x
 
     def forward_pts_train(self,

@@ -20,24 +20,27 @@ model = dict(
         with_cluster_center=True,
         with_voxel_center=True,
         point_cloud_range=[-50, -50, -5, 50, 50, 3],
-        norm_cfg=dict(type='naiveSyncBN1d', eps=1e-3, momentum=0.01)),
+        norm_cfg=dict(type='BN1d', eps=1e-3, momentum=0.01)
+    ),
     pts_middle_encoder=dict(
         type='PointPillarsScatter', in_channels=int(64//1.4), output_shape=[400, 400]),
     pts_backbone=dict(
         type='SECOND',
         in_channels=int(64//1.4),
-        norm_cfg=dict(type='naiveSyncBN2d', eps=1e-3, momentum=0.01),
+        norm_cfg=dict(type='BN2d', eps=1e-3, momentum=0.01),
         layer_nums=[3, 5, 5],
         layer_strides=[2, 2, 2],
-        out_channels=[int(64//1.4), int(128//1.4), int(256//1.4)]),
+        out_channels=[int(64//1.4), int(128//1.4), int(256//1.4)]
+    ),
     pts_neck=dict(
         type='FPN',
-        norm_cfg=dict(type='naiveSyncBN2d', eps=1e-3, momentum=0.01),
+        norm_cfg=dict(type='BN2d', eps=1e-3, momentum=0.01),
         act_cfg=dict(type='ReLU'),
         in_channels=[int(64//1.4), int(128//1.4), int(256//1.4)],
         out_channels=int(256//1.4),
         start_level=0,
-        num_outs=3),
+        num_outs=3
+    ),
     pts_bbox_head=dict(
         type='Anchor3DHead',
         num_classes=10,
@@ -93,3 +96,6 @@ model = dict(
             score_thr=0.05,
             min_bbox_size=0,
             max_num=500)))
+# runtime settings
+device = 'cuda'
+gpu_ids = [0]
